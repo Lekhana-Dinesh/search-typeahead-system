@@ -1,0 +1,17 @@
+node_modules/
+.npm-cache/
+dist/
+coverage/
+*.log
+logs/
+
+.env
+.env.*
+
+data/*.db
+data/*.db-*
+data/generated-queries-*.csv
+data/generated-queries.csv
+
+.DS_Store
+Thumbs.db
