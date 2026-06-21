@@ -2,14 +2,16 @@
 
 ## Overview
 
-This project implements a search typeahead system with four main pieces:
+SearchIQ is organized as a small, locally reproducible typeahead stack with four layers:
 
-- React frontend for the search box, suggestion dropdown, signals section, and request insights panel
-- Express API for suggestion, search submission, cache debug, trending, and metrics endpoints
+- React frontend for the search input, suggestion dropdown, ranking toggle, and request insights
+- Express API for suggestion lookup, search submission, cache inspection, metrics, and trending output
 - SQLite database as the local source of truth for `query,count`
-- In-memory distributed cache simulation using logical cache nodes and consistent hashing
+- In-memory logical cache nodes coordinated through a consistent-hash ring
 
-## Mermaid Diagram
+The design intentionally favors clarity over infrastructure sprawl. It demonstrates cache-aside reads, prefix-level caching, a rolling one-hour trending window, and write coalescing without requiring external services.
+
+## Architecture Diagram
 
 ```mermaid
 flowchart LR
@@ -32,104 +34,96 @@ flowchart LR
     B --> D
 ```
 
-## End-to-End Request Flow
+## Read Path
 
-1. The user types into the React search box.
-2. The frontend waits for a 280ms debounce.
-3. The UI calls `GET /suggest?q=<prefix>&ranking=<mode>`.
-4. The backend normalizes the prefix and asks the consistent-hash ring which cache node owns it.
-5. On cache hit, cached suggestions are returned immediately.
-6. On cache miss, the backend queries SQLite, merges any unflushed batch increments, ranks results, caches the response, and returns it.
-7. The frontend shows suggestions plus request metadata such as cache source, node, cache status, TTL, and latency.
+1. The user types into the search input.
+2. The frontend waits for the debounce window before calling `GET /suggest`.
+3. The API normalizes the prefix and builds a cache key in the form `<ranking>:<prefix>`.
+4. The consistent-hash ring selects the owning logical cache node.
+5. On cache hit, the cached ranked response is returned immediately.
+6. On cache miss, SQLite is queried, pending in-memory increments are merged, ranking is applied, and the response is written back to the cache.
+7. The frontend displays suggestions along with source, cache node, cache status, TTL, and latency metadata.
 
-## Suggestion API Flow
+This is a cache-aside flow: the database remains authoritative, while the cache accelerates repeated prefix lookups.
 
-### Basic Ranking
+## Prefix-Level Cache
 
-- Normalize prefix to lowercase
-- Find matching rows where `normalized_query` starts with the prefix
-- Sort by all-time `count DESC`
-- Return top 10
+The cache is keyed by ranking mode and normalized prefix:
 
-### Trending Ranking
-
-- Normalize prefix to lowercase
-- Fetch a wider candidate set from SQLite
-- Merge unflushed batch increments
-- Look up recent activity from the rolling window
-- Compute `score = allTimeCount + recentCountLastHour * trendingBoost`
-- Sort by `score DESC`, then `count DESC`, then query text
-- Return top 10
-
-## Cache Flow
-
-- Cache key format: `<ranking>:<prefix>`
-- Example: `basic:iph`
-- The consistent-hash ring maps each key to one logical cache node
-- Each node stores entries in a local `Map`
-- Each cache entry has a TTL
-- `POST /search` invalidates cached prefixes for the searched query in both `basic` and `trending` modes
+- `basic:iph`
+- `trending:iph`
 
 Why prefix-level caching is used:
 
-- users often type the same short prefixes
-- cache entries are reusable across many users
-- the prefix itself is the natural lookup unit for autocomplete
+- Typeahead workloads repeat short prefixes heavily
+- The prefix is the natural lookup unit for autocomplete
+- Cached results can be reused across many users and requests
 
-## Consistent Hashing Explanation
+Each cache entry has:
 
-The project uses a simple consistent-hash ring with virtual nodes:
+- a logical owner chosen by consistent hashing
+- a TTL
+- ranking-specific contents
+
+`POST /search` invalidates affected prefixes in both basic and trending mode so subsequent reads can refresh from the source of truth.
+
+## Consistent Hashing
+
+The project uses a consistent-hash ring with virtual nodes:
 
 - each logical cache node appears multiple times on the ring
-- a cache key is hashed
-- the next clockwise node owns the key
+- the cache key is hashed
+- the next clockwise virtual node owns that key
 
-Why this is useful in the assignment:
+This keeps the demonstration simple while still showing how key ownership can be distributed across logical nodes.
 
-- the same prefix reliably maps to the same cache node
-- it demonstrates how distributed caches can partition keys
-- virtual nodes give a more even distribution without adding much complexity
+This remains a local simulation. In a larger deployment, Redis Cluster or Memcached would be a better fit for actual distributed caching.
 
-This is explicitly a simulation. Real Redis Cluster or Memcached infrastructure is not required for this assignment.
+## Ranking Logic
 
-## Trending Ranking Flow
+### Basic Ranking
 
-- `POST /search` records the normalized query in the trending service
-- the trending service stores timestamps in a rolling one-hour window
-- old timestamps expire automatically when the query is read again
-- the ranking formula is:
+- normalize the prefix
+- fetch prefix matches from SQLite
+- merge pending buffered increments
+- sort by all-time `count DESC`
+- return the top 10 results
 
-```text
-score = allTimeCount + recentCountLastHour * 50
-```
+### Trending Ranking
 
-Why this formula is easy to explain:
+- normalize the prefix
+- fetch a wider candidate set from SQLite
+- merge pending buffered increments
+- look up recent activity from the rolling one-hour window
+- compute `score = allTimeCount + recentCountLastHour * 50`
+- sort by `score DESC`, then `count DESC`, then query text
+- return the top 10 results
 
-- all-time count preserves historical popularity
-- recent count surfaces fresh interest
-- the fixed boost is simple to explain during the submission demo
+The trending formula is intentionally transparent rather than personalized or model-driven. It keeps historical popularity while allowing recent interest to reshape the order quickly.
 
-## Batch-Write Flow
+## Write Path
 
 1. `POST /search` normalizes the query.
-2. The query is added to an in-memory aggregation buffer instead of updating SQLite immediately.
-3. Repeated queries are merged into one pending increment.
-4. The buffer flushes every 5 seconds or when the configured batch size is reached.
-5. Flush writes are applied inside a SQLite transaction.
-6. Metrics report submissions, pending buffered writes, flushes, writes avoided, and write reduction.
+2. The recent-activity service records the event immediately.
+3. The batch writer adds the query to an in-memory aggregation buffer instead of writing to SQLite synchronously.
+4. Repeated queries are coalesced into one pending increment per normalized query.
+5. The buffer flushes on interval or batch threshold.
+6. Flushes are executed inside a SQLite transaction.
 
-## Key Trade-offs
+This reduces write amplification and provides a clear example of write coalescing.
 
-- SQLite keeps the project local, predictable, and easy to demo.
-- Prefix range queries are simple and sufficient for 100k records.
-- In-memory caching and batching are easy to understand but not durable across process restarts.
-- The trending formula is intentionally simple instead of ML-based or personalized.
+## Trade-offs
 
-## Future Improvements (Not Implemented)
+- SQLite keeps local setup simple, deterministic, and reliable, but it is not horizontally scalable.
+- Logical cache nodes implemented with `Map` objects demonstrate ownership and TTL behavior, but they do not provide true cross-process distribution.
+- The in-memory batch buffer improves local write efficiency, but pending increments can be lost if the process exits before flush.
+- The ranking strategy is explainable and reproducible, but intentionally does not attempt personalization or ML-based scoring.
 
-If this assignment needed to scale beyond the local demo, reasonable next steps would be:
+## Production Alternatives
 
-- Redis Cluster instead of in-memory cache maps
-- trie/search index for larger datasets
-- durable queue such as Kafka, Redis Streams, or SQS for write buffering
-- read replicas and better observability
+If this design were extended beyond the local simulation, reasonable substitutes would be:
+
+- Redis Cluster or Memcached for the cache layer
+- a trie, search index, or specialized search engine for larger prefix workloads
+- Kafka, Redis Streams, SQS, or a database-backed queue for durable write buffering
+- broader observability and scaling controls around the API layer

@@ -1,9 +1,21 @@
 # API Documentation
 
+This API is designed for a locally reproducible typeahead system. The read path uses a cache-aside flow with prefix-level cache entries, and the write path uses coalesced batch updates instead of synchronous per-request database writes.
+
+## Endpoint Summary
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/suggest?q=<prefix>` | Return up to 10 prefix suggestions using basic ranking |
+| `GET` | `/suggest?q=<prefix>&ranking=trending` | Return up to 10 suggestions using recency-aware ranking |
+| `POST` | `/search` | Record a search submission and queue count updates |
+| `GET` | `/cache/debug?prefix=<prefix>` | Inspect cache ownership, key normalization, and TTL |
+| `GET` | `/trending?limit=<n>` | Return the current trending list used by the UI |
+| `GET` | `/metrics` | Return cache, batch-write, and database metrics |
+
 ## `GET /suggest?q=<prefix>`
 
-Purpose:
-Returns up to 10 prefix suggestions using basic ranking.
+Returns up to 10 case-insensitive prefix matches using basic ranking.
 
 Example:
 
@@ -33,39 +45,23 @@ Example response:
 }
 ```
 
+Important behavior:
+
+- Basic ranking sorts by all-time `count DESC`
+- Empty prefixes return `200` with an empty suggestion list
+- Invalid `ranking` values fall back to `basic`
+- The cache key format is `basic:<prefix>`
+
 Important fields:
 
 - `source`: `database`, `cache`, or `none`
 - `cacheStatus`: `miss`, `hit`, `expired`, or `skipped`
-- `cacheNode`: logical cache node that owns the prefix
-- `suggestions`: up to 10 prefix matches sorted by all-time count in basic mode
-
-Edge cases:
-
-- empty prefix returns `200` with an empty suggestion list
-- invalid `ranking` defaults to `basic`
-
-## `GET /suggest?q=<prefix>&ranking=basic`
-
-Purpose:
-Explicit version of the basic ranking flow.
-
-Example:
-
-```http
-GET /suggest?q=iph&ranking=basic
-```
-
-Behavior:
-
-- same prefix matching logic
-- sorted by all-time count descending
-- cached using key format `basic:<prefix>`
+- `cacheNode`: logical cache node selected by consistent hashing
+- `suggestions`: up to 10 ranked prefix matches
 
 ## `GET /suggest?q=<prefix>&ranking=trending`
 
-Purpose:
-Returns up to 10 suggestions using the recency-aware trending formula.
+Returns up to 10 suggestions using a rolling one-hour trending window.
 
 Example:
 
@@ -95,16 +91,21 @@ Example response:
 }
 ```
 
-Formula:
+Trending formula:
 
 ```text
 score = allTimeCount + recentCountLastHour * 50
 ```
 
+Important behavior:
+
+- Ranking merges historical counts with recent activity
+- The cache key format is `trending:<prefix>`
+- Recently searched low-count queries can surface even after the batch buffer flushes
+
 ## `POST /search`
 
-Purpose:
-Records a submitted query, updates recent activity, adds the query to the batch-write buffer, and invalidates affected cached prefixes.
+Records a submitted query, updates the recent-activity window immediately, invalidates affected prefix keys, and adds the query to the batch buffer for later SQLite persistence.
 
 Example:
 
@@ -127,24 +128,23 @@ Example response:
 
 Important behavior:
 
-- does not synchronously update SQLite on every request
-- aggregates repeated queries in memory
-- influences trending ranking immediately
+- Does not synchronously update SQLite on every request
+- Coalesces repeated queries in memory
+- Influences trending ranking before the next database flush
 
 Error cases:
 
-- empty or whitespace-only query returns `400`
-- malformed JSON body returns `400` with `{"message":"Invalid JSON body."}`
+- Empty or whitespace-only queries return `400`
+- Malformed JSON returns `400` with `{"message":"Invalid JSON body."}`
 
 ## `GET /cache/debug?prefix=<prefix>`
 
-Purpose:
-Shows which logical cache node owns a prefix and whether the cached entry exists.
+Shows which logical cache node owns a normalized prefix key and whether a cached entry exists.
 
 Example:
 
 ```http
-GET /cache/debug?prefix=iph
+GET /cache/debug?prefix=IPH
 ```
 
 Example response:
@@ -169,15 +169,15 @@ Example response:
 
 Important fields:
 
-- `assignedNode`: cache owner chosen by consistent hashing
+- `prefix`: normalized lowercase prefix
+- `assignedNode`: cache owner selected by consistent hashing
 - `cacheStatus`: `hit`, `miss`, or `expired`
-- `ttlSecondsRemaining`: remaining TTL if present
-- `stats`: node-local cache hit/miss information
+- `ttlSecondsRemaining`: remaining TTL for the cached entry
+- `stats`: node-local cache hit, miss, and key counts
 
 ## `GET /trending?limit=<n>`
 
-Purpose:
-Returns the current trending queries used by the UI signals section.
+Returns the current trending list used by the UI signals panel.
 
 Example:
 
@@ -205,8 +205,7 @@ Example response:
 
 ## `GET /metrics`
 
-Purpose:
-Returns cache, batch-writer, and database metrics useful for demo and debugging.
+Returns counters for cache usage, batch writes, and database operations.
 
 Example:
 
@@ -250,3 +249,10 @@ Example response:
   "indexedQueries": 100000
 }
 ```
+
+Useful metrics:
+
+- Cache hit rate across all logical nodes
+- Pending versus flushed batch entries
+- Database writes avoided through write coalescing
+- Total indexed dataset size

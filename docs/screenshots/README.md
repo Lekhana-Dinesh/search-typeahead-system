@@ -1,9 +1,11 @@
-# Screenshots
+# Screenshot Index
 
-This folder contains the final submission screenshots for SearchIQ. Each image maps to a behavior:
+This folder contains the report screenshots referenced in the repository documentation and in [Project_Report.pdf](../Project_Report.pdf).
 
-- `home.png` - initial UI showing the search interface, indexed dataset summary, and evidence cards
-- `suggestions.png` - prefix suggestions for `iph`, demonstrating the dropdown and count-based ranking
-- `cache-hit.png` - repeated `iph` lookup, showing cache source, cache status, cache node, latency, and TTL
-- `trending.png` - trending ranking mode, showing recency-aware ordering and score values
-- `batch-metrics.png` - write optimization evidence, showing submissions, flushes, writes avoided, and reduction
+| File | What it shows |
+| --- | --- |
+| `home.png` | Initial SearchIQ screen with the search interface and overview metrics |
+| `suggestions.png` | Prefix suggestions for `iph`, including top matches and counts |
+| `cache-hit.png` | Repeated prefix lookup showing cache hit, cache node, latency, and TTL |
+| `trending.png` | Trending mode with recency-aware ranking and score values |
+| `batch-metrics.png` | Batch-write metrics including submissions, flushes, writes avoided, and reduction |

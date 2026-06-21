@@ -1,128 +1,108 @@
 # Performance Report
 
+This document records measured local results from the current implementation. The goal is to show that the deterministic dataset can be loaded quickly, repeated prefix reads benefit from the cache-aside path, and write coalescing reduces database write pressure.
+
 ## Seed Performance
 
-Measured on this local Windows setup using the current implementation:
+### Measured results
 
-### `npm run seed:small`
+| Command | Rows inserted | CSV generation | Ingestion | Total duration |
+| --- | --- | --- | --- | --- |
+| `npm run seed:small` | `5,000` | `55ms` | `870ms` | `975ms` |
+| `npm run seed` | `100,000` | `546ms` | `4323ms` | `4879ms` |
 
-- rows inserted: `5,000`
-- CSV generation: `55ms`
-- ingestion: `870ms`
-- total duration: `975ms`
+### Interpretation
 
-### `npm run seed`
+- Dataset generation is deterministic and bounded
+- Schema setup and ingestion complete well within the local performance target
+- The ingestion path uses SQLite transactions rather than per-row writes outside a transaction
+- Progress logging and total-duration logging are included in the seed flow
 
-- rows inserted: `100,000`
-- CSV generation: `546ms`
-- ingestion: `4323ms`
-- total duration: `4879ms`
+## Cache Behavior
 
-Interpretation:
-
-- the old slow path was removed
-- CSV generation is deterministic and bounded
-- ingestion uses SQLite transactions and batched writes
-- the seed now completes far below the assignment's 1 to 2 minute requirement
-
-## Cache Hit / Miss Example
-
-Suggested demo:
+Suggested local verification flow:
 
 1. Call `GET /suggest?q=iph`
 2. Observe `source: "database"` and `cacheStatus: "miss"`
 3. Call the same request again
 4. Observe `source: "cache"` and `cacheStatus: "hit"`
-5. Open `GET /cache/debug?prefix=iph` to show TTL and node-local hit rate
+5. Open `GET /cache/debug?prefix=iph` to inspect TTL and node-local hit rate
 
-Why hit rate matters:
+Why this matters:
 
-- a higher hit rate means fewer database reads
-- autocomplete prefixes repeat frequently, so prefix-level caching is effective
+- repeated typeahead prefixes are a strong fit for prefix-level caching
+- cache hits reduce SQLite read pressure
+- consistent hashing keeps prefix ownership stable across logical cache nodes
 
-## Database Read / Write Explanation
+## Database Read and Write Behavior
 
 ### Reads
 
-- on cache miss, `/suggest` reads from SQLite
-- on cache hit, SQLite read is avoided
-- `/metrics` exposes database read operation counts for demo reporting
+- On cache miss, `/suggest` reads from SQLite
+- On cache hit, the SQLite read is avoided
+- `/metrics` exposes database read-operation counts for validation
 
 ### Writes
 
-- `/search` does not write synchronously to SQLite
-- repeated queries are aggregated in memory
-- flush writes update multiple increments in one transaction
-- `/metrics` exposes write operation counts and written-row totals
+- `/search` does not synchronously write every submission to SQLite
+- Repeated searches are coalesced in memory
+- Flushes persist aggregated increments inside a SQLite transaction
+- `/metrics` exposes flush count, pending entries, and write-reduction counters
 
-## Batch Write Reduction
+## Write Reduction Example
 
-Example:
+If the same query is submitted 10 times before a flush:
 
-- 10 search submissions for the same query
-- 1 aggregated row written during flush
-- 9 writes avoided
+- search submissions recorded: `10`
+- aggregated database rows written: `1`
+- database writes avoided: `9`
 
-Why this helps:
-
-- fewer SQLite writes
-- lower write amplification
-- simpler demonstration of write buffering
+This keeps the write path compact while preserving the final count update after flush.
 
 Trade-off:
 
-- if the process crashes before flush, buffered increments can be lost
+- Pending increments in the in-memory batch buffer can be lost if the process crashes before the next flush
 
-Production alternative:
+Production alternatives:
 
 - Kafka
 - Redis Streams
 - SQS
 - database-backed queue
 
-## Latency Tracking Template
-
-Use this table during a demo:
-
-| Scenario | Example request | Expected source | Sample observation |
-| --- | --- | --- | --- |
-| cold prefix | `/suggest?q=iph` | database | slightly higher latency |
-| warm prefix | `/suggest?q=iph` again | cache | lower latency |
-| trending mode | `/suggest?q=iph&ranking=trending` | database/cache | similar, with extra scoring work |
-
 ## Local Latency Measurements
 
-Measured locally against the final implementation using `npm run benchmark` with the API running on `http://localhost:3001`:
+Measured locally with `npm run benchmark` against a running API on `http://localhost:3001`:
 
-- cold `/suggest?q=iph`: `10.94ms` wall-clock, `6.25ms` API-reported latency
-- warm `/suggest?q=iph` p95 over 25 requests: `3.28ms` wall-clock, `0.22ms` API-reported latency
-- warm `/suggest?q=iph&ranking=trending` p95 over 25 requests: `2.05ms` wall-clock, `0.18ms` API-reported latency
-- measured cache hit rate after warm-up: `0.96`
+| Scenario | Measured value |
+| --- | --- |
+| Cold `/suggest?q=iph` | `10.94ms` wall-clock, `6.25ms` API-reported latency |
+| Warm `/suggest?q=iph` p95 over 25 requests | `3.28ms` wall-clock, `0.22ms` API-reported latency |
+| Warm `/suggest?q=iph&ranking=trending` p95 over 25 requests | `2.05ms` wall-clock, `0.18ms` API-reported latency |
+| Cache hit rate after warm-up | `0.96` |
 
-## p95 Latency Template
+## Benchmark Notes
 
-If you want to repeat the measurement on another laptop, run the same request many times and compute the 95th percentile.
+The benchmark script:
 
-Suggested commands to test manually after starting the app:
+- calls the running API rather than importing backend internals
+- measures a cold suggestion request
+- measures warm p95 latency for basic and trending ranking
+- reads cache hit rate from `/metrics`
+
+Command:
 
 ```powershell
-Invoke-RestMethod "http://localhost:3001/suggest?q=iph"
-Invoke-RestMethod "http://localhost:3001/cache/debug?prefix=iph"
-Invoke-RestMethod "http://localhost:3001/metrics"
+npm run benchmark
 ```
 
-Sample reporting format:
+## Validation Commands
 
-| Endpoint | Cache state | p95 latency |
-| --- | --- | --- |
-| `/suggest?q=iph` | cold | measure locally |
-| `/suggest?q=iph` | warm | measure locally |
-| `/suggest?q=iph&ranking=trending` | warm | measure locally |
+```powershell
+npm run seed:small
+npm run seed
+npm test
+npm run build
+```
 
-## How to Demo Performance
-
-1. Run `npm run seed` and show the total duration.
-2. Start the app and query `iph`.
-3. Query `iph` again and point out the cache hit.
-4. Open `/metrics` and show hit rate plus write-reduction metrics.
-5. Submit the same search several times and show batch aggregation behavior.
+These commands validate the local seed path, API behavior, and production build output without changing the system design or runtime behavior.

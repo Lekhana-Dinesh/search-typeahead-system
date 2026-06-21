@@ -1,222 +1,91 @@
-# Search Typeahead System
+# SearchIQ Typeahead System
 
-A locally runnable search typeahead/autocomplete assignment project built for system-design evaluation. It demonstrates prefix suggestions, a distributed cache simulation using consistent hashing, trending ranking, and batched database writes without over-engineering the solution.
+SearchIQ is a locally reproducible search typeahead system that combines fast prefix suggestions, cache-aside reads, recency-aware ranking, and write coalescing in a compact Node.js and React codebase. The project uses a deterministic 100,000-row dataset, SQLite as the local source of truth, logical cache nodes with consistent hashing, and batched write flushes to demonstrate core system-design ideas without changing the underlying API into a production-only architecture.
 
-## Assignment Goal
+## Feature Checklist
 
-The project models how a search box can return fast prefix suggestions while still handling changing popularity and reducing database write pressure. It is intentionally student-friendly:
+- Deterministic 100,000-row `query,count` dataset with fast local seeding
+- `GET /suggest?q=<prefix>` with case-insensitive prefix matching and a maximum of 10 results
+- Basic ranking by `count DESC`
+- `GET /suggest?q=<prefix>&ranking=trending` with a rolling one-hour trending window
+- `POST /search` returning `{ "message": "Searched" }`
+- Cache-aside read flow with prefix-level cache entries
+- Three logical cache nodes with consistent hashing
+- TTL-based expiry and prefix invalidation on search submission
+- `GET /cache/debug?prefix=<prefix>` for cache ownership and TTL inspection
+- Write coalescing through aggregated batch writes and SQLite transaction flushes
+- Metrics and benchmark support for cache hit rate, latency, and write reduction
+- React UI with debounce, suggestion dropdown, ranking toggle, and request insights
 
-- SQLite is the local source of truth.
-- In-memory `Map` objects simulate multiple cache nodes.
-- Consistent hashing shows how prefixes map to cache owners.
-- Batch writes show how search submissions can be buffered and flushed efficiently.
+## Architecture Summary
 
-## Features Implemented
+The system has four main layers:
 
-- `GET /suggest?q=<prefix>` with case-insensitive prefix matching
-- `GET /suggest?q=<prefix>&ranking=basic|trending`
-- `POST /search` with in-memory batch buffering instead of synchronous DB writes
-- `GET /cache/debug?prefix=<prefix>` for cache ownership, TTL, and node stats
-- `GET /trending` for the UI signals view
-- `GET /metrics` for cache and batch-writer metrics
-- 100,000-row CSV generation plus fast SQLite ingestion
-- React UI with debounce, keyboard navigation, loading, errors, trending mode, and request insights metadata
-- Tests for API behavior, consistent hashing, trending boost, batching, and empty-query handling
+- A React frontend issues debounced prefix lookups and search submissions.
+- An Express API coordinates suggestion ranking, cache inspection, metrics, and the batched write path.
+- SQLite stores the deterministic dataset and remains the local source of truth.
+- In-memory `Map` instances simulate logical cache nodes, while a consistent-hash ring assigns prefix keys to cache owners.
 
-## Tech Stack
-
-- Frontend: React + Vite
-- Backend: Node.js + Express
-- Database: SQLite via Node's built-in `node:sqlite`
-- Cache simulation: in-memory `Map` objects across logical cache nodes
-- Tests: Node test runner
-
-## Folder Structure
-
-```text
-search-typeahead-system/
-|-- docs/
-|-- public/
-|-- src/
-|   |-- api/
-|   |-- db/
-|   |-- scripts/
-|   |-- services/
-|   |-- styles/
-|   `-- utils/
-|-- tests/
-|-- package.json
-|-- server.js
-`-- vite.config.js
-```
+The read path follows a cache-aside pattern: the API checks the prefix-level cache first, falls back to SQLite on miss, and stores the ranked response back in the owning logical cache node. The write path uses an in-memory aggregation buffer so repeated searches can be coalesced and flushed in a single SQLite transaction.
 
 ## Setup
 
-Windows PowerShell commands:
+Node.js `24+` is required because the project uses the built-in `node:sqlite` module.
 
 ```powershell
 npm install --cache .npm-cache
 ```
 
-Node.js note:
+## Commands
 
-- Node.js `24+` is required because this project uses the built-in `node:sqlite` module.
+| Task | Command | Notes |
+| --- | --- | --- |
+| Install dependencies | `npm install --cache .npm-cache` | Uses a local npm cache directory |
+| Seed small dataset | `npm run seed:small` | Generates and ingests 5,000 rows |
+| Seed full dataset | `npm run seed` | Generates and ingests the deterministic 100,000-row dataset |
+| Run API and UI | `npm run dev` | API on `http://localhost:3001`, UI on `http://localhost:5173` |
+| Run API only | `npm start` | Starts the Express server |
+| Preview built UI | `npm run preview` | Serves the built frontend through Express |
+| Run tests | `npm test` | Node test runner |
+| Build frontend | `npm run build` | Vite production build |
+| Run benchmark | `npm run benchmark` | Requires the API to already be running |
 
-## Seed Commands
+## Seed Notes
 
-Fast development seed:
+Both seed commands:
 
-```powershell
-npm run seed:small
-```
-
-Full assignment seed:
-
-```powershell
-npm run seed
-```
-
-What these do:
-
-- generate a CSV with `query,count`
+- generate a deterministic CSV in `query,count` format
 - initialize the SQLite schema
-- ingest rows in bulk transactions
-- print progress every 10,000 rows for the full seed
+- ingest rows in bulk inside SQLite transactions
+- log progress and total duration
 
-Generated-data note:
+Generated files such as SQLite databases, generated CSVs, `dist`, `.npm-cache`, and `node_modules` are local artifacts and should not be included in a submission archive.
 
-- The SQLite database and generated CSV files are created by `npm run seed` or `npm run seed:small`.
-- Do not include `node_modules`, `.npm-cache`, `dist`, `data/*.db`, `data/*.db-*`, or generated CSV files in the final submission ZIP.
+## API Summary
 
-## Run Commands
+- `GET /suggest?q=<prefix>` returns up to 10 prefix-matching suggestions using basic ranking.
+- `GET /suggest?q=<prefix>&ranking=trending` applies the recency-aware ranking formula.
+- `POST /search` records recent activity, invalidates affected prefixes, and queues batched count updates.
+- `GET /cache/debug?prefix=<prefix>` shows the owning logical cache node, key, TTL, and cache state.
+- `GET /trending?limit=<n>` returns the current recency-aware trending list.
+- `GET /metrics` exposes cache, batch-write, and database counters.
 
-Run API + frontend in development:
+Detailed request and response examples are documented in [docs/api.md](docs/api.md).
 
-```powershell
-npm run dev
-```
+## Documentation
 
-Frontend URL:
+- Architecture: [docs/architecture.md](docs/architecture.md)
+- API reference: [docs/api.md](docs/api.md)
+- Performance notes: [docs/performance-report.md](docs/performance-report.md)
+- Screenshot index: [docs/screenshots/README.md](docs/screenshots/README.md)
+- Final report: [docs/Project_Report.pdf](docs/Project_Report.pdf)
 
-```text
-http://localhost:5173
-```
+All screenshots used in the repository are stored under [docs/screenshots/](docs/screenshots/).
 
-API URL:
+## Production Trade-offs
 
-```text
-http://localhost:3001
-```
-
-Run the API only:
-
-```powershell
-npm start
-```
-
-Build the frontend:
-
-```powershell
-npm run build
-```
-
-Serve the built frontend through the Express server:
-
-```powershell
-npm run preview
-```
-
-Preview URL:
-
-```text
-http://localhost:3001
-```
-
-## Test Commands
-
-```powershell
-npm test
-```
-
-## Exact Local Run Sequence
-
-```powershell
-npm install --cache .npm-cache
-npm run seed
-npm run dev
-```
-
-Then open `http://localhost:5173`.
-
-## Submission Screenshots
-
-The submission screenshots are stored in `docs/screenshots/`:
-
-- `home.png` - home screen with the SearchIQ UI, indexed dataset summary, and evidence section
-- `suggestions.png` - prefix suggestions for `iph`, showing matching queries and counts
-- `cache-hit.png` - repeated prefix lookup showing cache hit, cache node, latency, and TTL
-- `trending.png` - trending ranking mode with score-based ordering
-- `batch-metrics.png` - write optimization metrics showing submissions, flushes, writes avoided, and reduction
-
-## Demo Flow
-
-1. Run `npm run seed` and point out the 100,000-row generation and ingestion logs.
-2. Start the app with `npm run dev`.
-3. Type `iph` and show the first `/suggest` response comes from the database.
-4. Type `iph` again and show the source changes to `cache`.
-5. Open the Request insights section and explain cache node assignment, cache status, TTL, and latency.
-6. Switch to trending mode.
-7. Submit `iphone update` a few times and show it rise because `score = allTimeCount + recentCountLastHour * 50`.
-8. Point to batch-writer metrics: submissions, pending searches, flushes, writes avoided.
-9. Call out that SQLite and cache nodes are local simulations chosen for assignment clarity.
-
-## Design Explanation Note
-
-- The submission is designed to be easy to explain: data storage, cache ownership, trending scoring, and batch-write trade-offs are documented in the main assignment-facing docs.
-
-## Troubleshooting
-
-- If the UI is empty on first load, make sure `npm run seed` completed successfully before `npm run dev`.
-- If port `3001` or `5173` is already in use, stop the existing process and rerun `npm run dev`.
-- The `ExperimentalWarning` for `node:sqlite` is expected on current Node versions and does not block the app.
-- If you want a quicker local reset while iterating, use `npm run seed:small`.
-
-## Marking / Evaluation Mapping
-
-### Basic Implementation
-
-- 100,000-row CSV generation and ingestion are implemented.
-- Prefix suggestions are case-insensitive, capped at 10, and sorted by all-time count in basic mode.
-- Cache is checked before the database and the response reports `source` and `cacheNode`.
-- The UI supports debounce, keyboard navigation, submit-on-Enter, and graceful empty results.
-
-### Trending Searches
-
-- `POST /search` records recent activity in a rolling window.
-- `GET /suggest?...&ranking=trending` uses `score = allTimeCount + recentCountLastHour * 50`.
-- The UI signals section and tests make the ranking change visible and easy to explain.
-
-### Batch Writes
-
-- Search submissions go into an in-memory aggregation buffer instead of synchronously updating SQLite.
-- Flushes happen periodically and can also happen when the configured batch size is reached.
-- Metrics expose submissions, pending buffered writes, flush count, writes avoided, and write reduction.
-
-### Cache / Consistent Hashing
-
-- Three logical cache nodes are simulated with `Map` objects.
-- Consistent hashing routes the same prefix to the same node.
-- TTL-based cache expiry and explicit prefix invalidation are both supported.
-
-### Documentation / Explanation
-
-- `docs/architecture.md` explains flows and trade-offs.
-- `docs/api.md` documents every API with examples.
-- `docs/performance-report.md` captures seed timings and demo-ready performance notes.
-
-## Assignment-Level Trade-offs
-
-- SQLite is used because it keeps setup simple and fully local.
-- Cache nodes are simulated in-memory, not with Redis or real networked services.
-- Batch writes are not durable before flush; this is documented as an intentional assignment trade-off.
-- Prefix lookup uses a SQL range query, which is fine for 100k local records and easy to explain.
+- SQLite keeps the project easy to run locally, but it is not horizontally scalable like a managed distributed datastore.
+- Logical cache nodes implemented with `Map` objects demonstrate prefix ownership and cache-aside behavior, but they are a local simulation rather than Redis Cluster or Memcached.
+- The rolling one-hour trending window is intentionally simple and transparent rather than personalized or ML-driven.
+- The in-memory batch buffer improves write reduction locally, but pending increments can be lost on crash before flush.
+- For larger-scale deployments, reasonable alternatives would include Redis Cluster for caching, a trie or search index for larger prefix workloads, and Kafka, Redis Streams, SQS, or a database-backed queue for durable write buffering.

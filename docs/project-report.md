@@ -187,6 +187,48 @@
       padding: 7px 8px;
     }
 
+    .figure-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    .figure-card {
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #ffffff;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .figure-card.wide {
+      grid-column: 1 / -1;
+    }
+
+    .figure-card img {
+      display: block;
+      width: 100%;
+      max-height: 190px;
+      object-fit: contain;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #f8fafc;
+    }
+
+    .figure-file {
+      margin-top: 8px;
+      font-weight: 700;
+      font-size: 9.5pt;
+    }
+
+    .figure-note {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 9pt;
+    }
+
     .page-break {
       break-before: page;
     }
@@ -197,9 +239,9 @@
     <div class="eyebrow">Project Report</div>
     <h1>SearchIQ Typeahead System</h1>
     <p class="subtitle">
-      Single-file submission report for the local search typeahead project. This report combines the
-      architecture explanation, dataset and loading notes, API documentation, design trade-offs,
-      performance evidence, screenshots, and requirement-to-implementation mapping for the final form submission.
+      Consolidated report for a locally reproducible search typeahead system. It covers the architecture,
+      deterministic dataset and loading flow, API surface, design trade-offs, performance results,
+      screenshot evidence, and validation outcomes in one submission-ready document.
     </p>
     <div class="metric-grid">
       <div class="metric">
@@ -224,7 +266,7 @@
   <h2>1. Executive Summary</h2>
   <p>
     SearchIQ is a locally runnable typeahead/autocomplete system built to demonstrate four ideas together:
-    fast prefix suggestions, cache-first reads, trending ranking based on recent activity, and batched
+    fast prefix suggestions, cache-aside reads, trending ranking based on recent activity, and batched
     database writes that reduce write amplification.
   </p>
   <p>
@@ -238,8 +280,8 @@
   <h2>2. Architecture Overview</h2>
   <p>
     The application has four main layers: a React frontend, an Express API, a SQLite data store, and a
-    distributed-cache simulation. The API is responsible for prefix lookup, ranking mode selection, cache
-    access, trending-window tracking, and batched updates.
+    distributed-cache simulation. The API is responsible for prefix lookup, ranking mode selection,
+    cache-aside reads, trending-window tracking, and batched updates.
   </p>
 
   <h3>Architecture Diagram</h3>
@@ -636,7 +678,7 @@ POST /search
       </tr>
       <tr>
         <td>Screenshot evidence availability</td>
-        <td>All submission screenshots are stored in the repository and referenced by filename for review.</td>
+        <td>All submission screenshots are stored in the repository and embedded as compact thumbnail cards in this report.</td>
         <td><code>docs/screenshots/</code>, Section 8 of this report</td>
       </tr>
     </tbody>
@@ -644,40 +686,79 @@ POST /search
 
   <h2>8. Screenshot Evidence</h2>
   <p>
-    All screenshots are included in the repository under docs/screenshots/.
+    All screenshots are included in the repository under <code>docs/screenshots/</code>.
+  </p>
+  <div class="figure-grid">
+    <div class="figure-card">
+      <img src="./screenshots/home.png" alt="SearchIQ home screen" />
+      <div class="figure-file">home.png</div>
+      <p class="figure-note">Initial SearchIQ screen with search interface and overview metrics.</p>
+    </div>
+    <div class="figure-card">
+      <img src="./screenshots/suggestions.png" alt="Suggestions for iph" />
+      <div class="figure-file">suggestions.png</div>
+      <p class="figure-note">Prefix suggestions for "iph", showing top matching queries and counts.</p>
+    </div>
+    <div class="figure-card">
+      <img src="./screenshots/cache-hit.png" alt="Cache hit state" />
+      <div class="figure-file">cache-hit.png</div>
+      <p class="figure-note">Repeated prefix lookup showing cache hit, cache node, latency, and TTL.</p>
+    </div>
+    <div class="figure-card">
+      <img src="./screenshots/trending.png" alt="Trending ranking mode" />
+      <div class="figure-file">trending.png</div>
+      <p class="figure-note">Trending mode showing recency-aware ranking and score values.</p>
+    </div>
+    <div class="figure-card wide">
+      <img src="./screenshots/batch-metrics.png" alt="Batch-write metrics" />
+      <div class="figure-file">batch-metrics.png</div>
+      <p class="figure-note">Batch-write metrics showing submissions, flushes, writes avoided, and reduction.</p>
+    </div>
+  </div>
+
+  <h2>9. Testing and Validation</h2>
+  <p>
+    The final validation sequence focuses on local reproducibility and correctness rather than infrastructure
+    complexity.
   </p>
   <table class="mapping-table">
     <thead>
       <tr>
-        <th>Screenshot file</th>
-        <th>What it proves</th>
+        <th>Command</th>
+        <th>Purpose</th>
+        <th>Latest result</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><code>home.png</code></td>
-        <td>Initial SearchIQ screen with search interface and overview metrics.</td>
+        <td><code>npm run seed:small</code></td>
+        <td>Validate the fast local seed path and smaller reproducible dataset.</td>
+        <td>Pass</td>
       </tr>
       <tr>
-        <td><code>suggestions.png</code></td>
-        <td>Prefix suggestions for "iph", showing top matching queries and counts.</td>
+        <td><code>npm run seed</code></td>
+        <td>Validate the full deterministic 100,000-row dataset load.</td>
+        <td>Pass</td>
       </tr>
       <tr>
-        <td><code>cache-hit.png</code></td>
-        <td>Repeated prefix lookup showing cache hit, cache node, latency, and TTL.</td>
+        <td><code>npm test</code></td>
+        <td>Verify API behavior, cache routing, trending ranking, and batch-write logic.</td>
+        <td>13/13 tests passed</td>
       </tr>
       <tr>
-        <td><code>trending.png</code></td>
-        <td>Trending mode showing recency-aware ranking and score values.</td>
+        <td><code>npm run build</code></td>
+        <td>Verify the frontend production build completes successfully.</td>
+        <td>Pass</td>
       </tr>
       <tr>
-        <td><code>batch-metrics.png</code></td>
-        <td>Batch-write metrics showing submissions, flushes, writes avoided, and reduction.</td>
+        <td><code>npm run benchmark</code></td>
+        <td>Measure cold and warm suggestion latency plus cache hit rate against a running API.</td>
+        <td>Cold 10.94ms, warm p95 3.28ms, trending p95 2.05ms, hit rate 96%</td>
       </tr>
     </tbody>
   </table>
 
-  <h2>9. Conclusion</h2>
+  <h2>10. Conclusion</h2>
   <p>
     This submission meets the project scope without unnecessary infrastructure. It provides a 100,000-row
     deterministic dataset, a functional typeahead UI, cache-first suggestion flow, consistent-hash cache
