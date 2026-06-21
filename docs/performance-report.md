@@ -90,7 +90,7 @@ Use this table during a demo:
 | warm prefix | `/suggest?q=iph` again | cache | lower latency |
 | trending mode | `/suggest?q=iph&ranking=trending` | database/cache | similar, with extra scoring work |
 
-## Sample Latency Measurements
+## Local Latency Measurements
 
 Measured locally against the final implementation:
 
