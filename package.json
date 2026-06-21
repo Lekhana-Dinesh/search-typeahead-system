@@ -14,6 +14,7 @@
     "test": "node --test",
     "generate:dataset": "node src/scripts/generateDataset.js",
     "ingest": "node src/scripts/ingestDataset.js",
+    "benchmark": "node src/scripts/benchmarkSuggest.js",
     "seed": "node src/scripts/seedDemoData.js 100000",
     "seed:small": "node src/scripts/seedDemoData.js 5000"
   },

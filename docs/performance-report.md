@@ -7,16 +7,16 @@ Measured on this local Windows setup using the current implementation:
 ### `npm run seed:small`
 
 - rows inserted: `5,000`
-- CSV generation: `159ms`
-- ingestion: `1085ms`
-- total duration: `1254ms`
+- CSV generation: `55ms`
+- ingestion: `870ms`
+- total duration: `975ms`
 
 ### `npm run seed`
 
 - rows inserted: `100,000`
-- CSV generation: `1097ms`
-- ingestion: `7695ms`
-- total duration: `8806ms`
+- CSV generation: `546ms`
+- ingestion: `4323ms`
+- total duration: `4879ms`
 
 Interpretation:
 
@@ -92,15 +92,12 @@ Use this table during a demo:
 
 ## Local Latency Measurements
 
-Measured locally against the final implementation:
+Measured locally against the final implementation using `npm run benchmark` with the API running on `http://localhost:3001`:
 
-- cold `/suggest?q=iph`: `3.35ms`
-- warm `/suggest?q=iph` p95: `0.26ms`
-- cold `/suggest?q=iph&ranking=trending`: `7.83ms`
-- warm `/suggest?q=iph&ranking=trending` p95: `0.22ms`
-- sample cache hit rate after warm-up: `0.98`
-- sample database read operations: `2`
-- sample database write operations during read-only latency run: `0`
+- cold `/suggest?q=iph`: `10.94ms` wall-clock, `6.25ms` API-reported latency
+- warm `/suggest?q=iph` p95 over 25 requests: `3.28ms` wall-clock, `0.22ms` API-reported latency
+- warm `/suggest?q=iph&ranking=trending` p95 over 25 requests: `2.05ms` wall-clock, `0.18ms` API-reported latency
+- measured cache hit rate after warm-up: `0.96`
 
 ## p95 Latency Template
 
